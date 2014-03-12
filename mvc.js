@@ -1,25 +1,33 @@
 Ext.Component.override({
+
+	/**
+	* @cfg {mvc.controller.ComponentController}
+	*/
+	controller: undefined,
+
     constructor: function (config) {
-        var controller;
+        var controller,
+        	app;
 
         if (config && config.controllerName) {
+        	if (!config.id) {
+        		console.error('Components with controllers must have an id.');
+        	}
+
+        	app = mvc.getApplication();
+
             this.controller = Ext.create(config.controllerName, {
-                application: mvc.getApplication(),
+                application: app,
                 id: config.controllerName + config.id,
-                component: this
+                component: this,
+                componentId: config.id
             });
+
+            app.controllers.add(this.controller);
+            this.controller.doInit();
         }
 
         this.callParent(arguments);
-    },
-
-    initComponent: function () {
-    	this.callParent(arguments);
-
-    	if (this.controller) {
-    		this.controller.getApplication().controllers.add(this.controller);
-    		this.controller.doInit();
-    	}
     },
 
     destroy: function () {
@@ -48,8 +56,45 @@ Ext.define('mvc.view.FooView', {
     items: [
     	{
     		xtype: 'button',
-    		text: 'hello'
+    		text: 'hello',
+    		handler: function () {
+    			this.up().fireEvent('donkey');
+    		}
     	}
+    ],
+
+    update: function (str) {
+        this.body.setHTML(str);
+    }
+});
+
+Ext.define('mvc.view.BusHrs1', {
+    extend: 'Ext.panel.Panel',
+    alias: 'widget.bushours1',
+    title: 'business hours',
+    items: [
+        {
+            xtype: 'button',
+            text: 'trigger change',
+            handler: function () {
+                this.up('bushours1').fireEvent('change');
+            }
+        }
+    ]
+});
+
+Ext.define('mvc.view.BusHrs2', {
+    extend: 'Ext.panel.Panel',
+    alias: 'widget.bushours2',
+    title: 'business hours',
+    items: [
+        {
+            xtype: 'textfield'
+        },
+
+        {
+            xtype: 'textfield'
+        }
     ]
 });
 
@@ -57,21 +102,26 @@ Ext.define('mvc.view.FooView', {
 // =========================================
 // CONTROLLERS
 
-// This controller can be inserted into a component
-// so it only handles events within the scope of the component.
+/**
+* A controller that can be bound to a component.
+*/
 Ext.define('mvc.controller.ComponentController', {
     extend: 'Ext.app.Controller',
 
-    listeners: {},
-
     constructor: function (config) {
-    	// TODO: rewrite the refs to localize to this component
+    	// Rewrite the refs to localize to this component.
+    	var refs = Ext.clone(this.refs);
+
+    	Ext.Array.each(refs, function (ref, index, refs) {
+    		refs[index].selector = '#' + config.componentId + ' ' + refs[index].selector;
+    	});
+    	config.refs = refs;
     	this.callParent(arguments);
     },
 
-    // override the basic control to localize
-    // listeners to this component
     /**
+    * Override the basic control to localize
+    * selectors to this component.
     * @param {Object} selectors
     */
     control: function (selectors) {
@@ -81,9 +131,9 @@ Ext.define('mvc.controller.ComponentController', {
     	// the EventBus only relays events for the bound component.
     	Ext.Object.each(selectors, function (scope, listeners) {
     		if (scope === 'root') {
-    			selectors['#' + me.component.id] = listeners;
+    			selectors['#' + me.componentId] = listeners;
     		} else {
-    			selectors['#' + me.component.id + ' ' + scope] = listeners;
+    			selectors['#' + me.componentId + ' ' + scope] = listeners;
     		}
 
     		delete selectors[scope];
@@ -92,6 +142,9 @@ Ext.define('mvc.controller.ComponentController', {
     	this.callParent(arguments);
     },
 
+    /**
+    * Remove this controller from the event bus.
+    */
     destroy: function () {
     	var me = this,
     		app = this.getApplication(),
@@ -121,11 +174,21 @@ Ext.define('mvc.controller.FooController', {
         {
             ref: 'fooView',
             selector: 'fooview'
+        },
+
+        {
+            ref: 'innerPanel',
+            selector: 'panel'
         }
     ],
 
     init: function() {
         this.control({
+        	// root indicates the scope is the 
+        	// TODO: Consider using '' instead to simplify the ComponentController.
+        	'root': {
+        		donkey: this.onDonkey
+        	},
             'button': {
                 click: this.onFooClick,
                 'some-funky-event': this.onSomeFunkyEvent
@@ -142,11 +205,55 @@ Ext.define('mvc.controller.FooController', {
     },
         
     onFooClick: function () {
-        console.log('clicked foo', this);
+        var innerPanel;
+        innerPanel = this.getInnerPanel();
+        if (innerPanel) {
+            innerPanel.update('The foo was clicked.');
+        } else {
+            console.log('clicked foo');
+        }
     },
 
     onSomeFunkyEvent: function () {
         console.log('onSomeFunkyEvent');
+    },
+
+    onDonkey: function () {
+    	console.log('donkey happened');
+    }
+});
+
+
+/**
+* Business Hours Controller
+*/
+Ext.define('mvc.controller.BusinessHoursController', {
+    extend: 'mvc.controller.ComponentController',
+    refs: [
+    ],
+
+    model: null,
+
+    init: function () {
+        this.control({
+            'root': {
+                change: this.onChange
+            },
+            'textfield': {
+                change: this.onTextChange
+            }
+        }); 
+
+        this.model = Ext.create('Nm.core.models.BusinessHours', {});
+    },
+
+    onChange: function () {
+        console.log('onChange');
+    },
+
+    onTextChange: function (field, newValue, oldValue) {
+        // this.onChange(newValue);
+        console.log('onTextChange');
     }
 });
 
@@ -169,21 +276,17 @@ Ext.define('mvc.controller.FooController', {
 			frame: true
 		},
 		items: [
-			{
-				id: 'a',
-				xtype: 'fooview',
-				controllerName: 'mvc.controller.FooController'
-			},
-			{
-				title: 'another thing',
-				items: [
-					{
-						id: 'b',
-						xtype: 'fooview',
-						controllerName: 'mvc.controller.FooController'
-					}
-				]
-			}
+            {
+                xtype: 'bushours1',
+                id: 'bus1',
+                controllerName: 'mvc.controller.BusinessHoursController'
+            },
+
+            {
+                xtype: 'bushours2',
+                id: 'bus2',
+                controllerName: 'mvc.controller.BusinessHoursController'
+            }
 		]
 	});
 
