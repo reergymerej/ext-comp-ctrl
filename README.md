@@ -1,0 +1,1 @@
+This is a test to add component-localized controllers to Ext JS 4.
